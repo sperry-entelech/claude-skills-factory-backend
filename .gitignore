@@ -1,0 +1,17 @@
+node_modules/
+.env
+.env.local
+data/
+*.db
+*.log
+.DS_Store
+.vscode/
+.idea/
+dist/
+build/
+.vercel
+.railway
+
+# OS files
+Thumbs.db
+desktop.ini

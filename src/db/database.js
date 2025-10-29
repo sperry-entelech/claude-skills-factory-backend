@@ -1,0 +1,173 @@
+const Database = require('better-sqlite3');
+const path = require('path');
+const fs = require('fs');
+
+class DatabaseConnection {
+  constructor() {
+    this.db = null;
+    this.dbPath = process.env.DATABASE_PATH || './data/skills.db';
+  }
+
+  connect() {
+    try {
+      // Ensure data directory exists
+      const dataDir = path.dirname(this.dbPath);
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+
+      // Connect to database
+      this.db = new Database(this.dbPath);
+      
+      // Enable foreign keys
+      this.db.pragma('foreign_keys = ON');
+      
+      // Enable WAL mode for better concurrency
+      this.db.pragma('journal_mode = WAL');
+      
+      console.log(`Connected to SQLite database: ${this.dbPath}`);
+      
+      // Initialize schema if needed
+      this.initializeSchema();
+      
+      return this.db;
+    } catch (error) {
+      console.error('Database connection failed:', error);
+      throw error;
+    }
+  }
+
+  initializeSchema() {
+    try {
+      // Check if tables exist
+      const tables = this.db.prepare(`
+        SELECT name FROM sqlite_master 
+        WHERE type='table' AND name IN ('skills', 'content_analyses', 'skill_versions', 'skill_usage')
+      `).all();
+
+      if (tables.length === 0) {
+        console.log('Initializing database schema...');
+        this.runMigrations();
+      } else {
+        console.log('Database schema already exists');
+      }
+    } catch (error) {
+      console.error('Schema initialization failed:', error);
+      throw error;
+    }
+  }
+
+  runMigrations() {
+    const migrationSQL = `
+      -- Create skills table
+      CREATE TABLE IF NOT EXISTS skills (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name VARCHAR(255) NOT NULL UNIQUE,
+        description TEXT,
+        skill_type VARCHAR(100) NOT NULL CHECK (skill_type IN ('copywriting', 'process', 'technical')),
+        version INTEGER DEFAULT 1 NOT NULL,
+        main_content TEXT NOT NULL,
+        \`references\` JSON NOT NULL DEFAULT '{}',
+        metadata JSON NOT NULL DEFAULT '{}',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_skills_type ON skills(skill_type);
+      CREATE INDEX IF NOT EXISTS idx_skills_created_at ON skills(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name);
+
+      -- Create content_analyses table
+      CREATE TABLE IF NOT EXISTS content_analyses (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        skill_id INTEGER,
+        source_content TEXT NOT NULL,
+        content_type VARCHAR(100) NOT NULL CHECK (content_type IN ('copywriting', 'process', 'technical')),
+        analysis_result JSON NOT NULL,
+        confidence REAL CHECK (confidence >= 0 AND confidence <= 1),
+        processing_time REAL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE SET NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_content_analyses_skill_id ON content_analyses(skill_id);
+      CREATE INDEX IF NOT EXISTS idx_content_analyses_created_at ON content_analyses(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_content_analyses_type ON content_analyses(content_type);
+
+      -- Create skill_versions table
+      CREATE TABLE IF NOT EXISTS skill_versions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        skill_id INTEGER NOT NULL,
+        version INTEGER NOT NULL,
+        main_content TEXT NOT NULL,
+        \`references\` JSON NOT NULL DEFAULT '{}',
+        metadata JSON NOT NULL DEFAULT '{}',
+        change_notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE CASCADE,
+        UNIQUE(skill_id, version)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_skill_versions_skill_id ON skill_versions(skill_id);
+      CREATE INDEX IF NOT EXISTS idx_skill_versions_version ON skill_versions(skill_id, version DESC);
+
+      -- Create skill_usage table
+      CREATE TABLE IF NOT EXISTS skill_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        skill_id INTEGER NOT NULL,
+        usage_context TEXT,
+        feedback_rating INTEGER CHECK (feedback_rating >= 1 AND feedback_rating <= 5),
+        improvement_notes TEXT,
+        used_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_skill_usage_skill_id ON skill_usage(skill_id);
+      CREATE INDEX IF NOT EXISTS idx_skill_usage_used_at ON skill_usage(used_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_skill_usage_rating ON skill_usage(feedback_rating);
+    `;
+
+    this.db.exec(migrationSQL);
+    console.log('Database schema initialized successfully');
+  }
+
+  getConnection() {
+    if (!this.db) {
+      throw new Error('Database not connected. Call connect() first.');
+    }
+    return this.db;
+  }
+
+  close() {
+    if (this.db) {
+      this.db.close();
+      this.db = null;
+      console.log('Database connection closed');
+    }
+  }
+
+  // Utility methods for common operations
+  query(sql, params = []) {
+    const stmt = this.db.prepare(sql);
+    return stmt.all(params);
+  }
+
+  get(sql, params = []) {
+    const stmt = this.db.prepare(sql);
+    return stmt.get(params);
+  }
+
+  run(sql, params = []) {
+    const stmt = this.db.prepare(sql);
+    return stmt.run(params);
+  }
+
+  transaction(fn) {
+    return this.db.transaction(fn);
+  }
+}
+
+// Singleton instance
+const dbConnection = new DatabaseConnection();
+
+module.exports = dbConnection;

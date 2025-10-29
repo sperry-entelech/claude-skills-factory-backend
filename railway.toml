@@ -1,0 +1,9 @@
+# Railway Deployment Configuration
+
+[build]
+command = "npm install"
+startCommand = "npm start"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
