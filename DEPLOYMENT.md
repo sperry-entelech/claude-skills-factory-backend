@@ -22,7 +22,7 @@ railway init
 
 4. Set environment variables in Railway dashboard:
 ```
-CLAUDE_API_KEY=sk-ant-api03-...
+CLAUDE_API_KEY=<your-anthropic-api-key>
 PORT=3001
 NODE_ENV=production
 DATABASE_PATH=/app/data/skills.db
