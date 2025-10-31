@@ -389,6 +389,111 @@ router.delete('/skills/:id', async (req, res) => {
 });
 
 /**
+ * POST /api/skills/:id/publish
+ * Publish skill to GitHub
+ */
+router.post('/skills/:id/publish', async (req, res) => {
+  try {
+    const db = dbConnection.getConnection();
+    const skillId = parseInt(req.params.id);
+
+    if (isNaN(skillId)) {
+      return res.status(400).json({
+        error: 'Invalid skill ID',
+        message: 'Skill ID must be a number'
+      });
+    }
+
+    // Get GitHub token from request or environment
+    const githubToken = req.body.githubToken || req.headers['x-github-token'] || process.env.GITHUB_TOKEN;
+
+    if (!githubToken) {
+      return res.status(401).json({
+        error: 'GitHub authentication required',
+        message: 'Please provide a GitHub personal access token. Add it as "githubToken" in the request body or set GITHUB_TOKEN environment variable.'
+      });
+    }
+
+    // Get skill data
+    const skill = db.prepare(`
+      SELECT name, description, main_content, \`references\`, metadata
+      FROM skills 
+      WHERE id = ?
+    `).get(skillId);
+
+    if (!skill) {
+      return res.status(404).json({
+        error: 'Skill not found',
+        message: 'The specified skill does not exist'
+      });
+    }
+
+    // Prepare skill files
+    const skillFiles = {
+      'SKILL.md': skill.main_content,
+      references: JSON.parse(skill.references)
+    };
+
+    // Publish to GitHub
+    const { publishSkillToGitHub } = require('../services/githubService');
+    const publishResult = await publishSkillToGitHub(
+      githubToken,
+      skill.name,
+      skill.description,
+      skillFiles,
+      req.body.isPrivate !== false, // Default to private
+      req.body.owner || null
+    );
+
+    // Update skill metadata with GitHub info
+    const metadata = JSON.parse(skill.metadata || '{}');
+    metadata.github = {
+      repositoryUrl: publishResult.repositoryUrl,
+      repositoryName: publishResult.repositoryName,
+      publishedAt: new Date().toISOString(),
+      installCommand: publishResult.installCommand
+    };
+
+    // Update database
+    db.prepare(`
+      UPDATE skills 
+      SET metadata = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(JSON.stringify(metadata), skillId);
+
+    res.json({
+      success: true,
+      message: 'Skill published to GitHub successfully',
+      ...publishResult
+    });
+
+  } catch (error) {
+    console.error('Publish skill error:', error);
+
+    // Handle specific errors
+    if (error.message.includes('already exists')) {
+      return res.status(409).json({
+        error: 'Repository already exists',
+        message: error.message,
+        suggestion: 'Try using a different skill name or delete the existing repository'
+      });
+    }
+
+    if (error.message.includes('authentication') || error.message.includes('401')) {
+      return res.status(401).json({
+        error: 'GitHub authentication failed',
+        message: 'Invalid or expired GitHub token'
+      });
+    }
+
+    res.status(500).json({
+      error: 'Failed to publish skill to GitHub',
+      message: error.message
+    });
+  }
+});
+
+/**
  * GET /api/skills/:id/download
  * Download skill as ZIP file
  */
@@ -420,7 +525,7 @@ router.get('/skills/:id/download', async (req, res) => {
 
     // Create skill files
     const skillFiles = {
-      'skill.md': skill.main_content,
+      'SKILL.md': skill.main_content,
       references: JSON.parse(skill.references)
     };
 

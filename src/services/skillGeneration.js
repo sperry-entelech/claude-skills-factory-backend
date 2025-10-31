@@ -574,7 +574,8 @@ async function generateSkill(analysisData, skillName, skillType, description, ta
       skillName: formatSkillName(skillName),
       description: description || generateDescription(analysisData, skillType),
       extractedData: analysisData.extractedData,
-      contentType: skillType
+      contentType: skillType,
+      tags: tags || []
     };
 
     // 3. Generate skill files from templates
@@ -599,7 +600,7 @@ async function generateSkill(analysisData, skillName, skillType, description, ta
       description: templateData.description,
       skill_type: skillType,
       version: 1,
-      main_content: skillFiles['skill.md'],
+      main_content: skillFiles['SKILL.md'],
       references: JSON.stringify(skillFiles.references),
       metadata: JSON.stringify(metadata)
     });
@@ -625,6 +626,71 @@ async function generateSkill(analysisData, skillName, skillType, description, ta
 }
 
 /**
+ * Generate YAML frontmatter for SKILL.md format
+ * @param {string} skillName - Name of the skill
+ * @param {string} description - Description of the skill
+ * @param {Array<string>} tags - Tags for the skill
+ * @param {string} skillType - Type of skill
+ * @param {number} version - Version number
+ * @returns {string} YAML frontmatter
+ */
+function generateSkillFrontmatter(skillName, description, tags, skillType, version = 1) {
+  const frontmatter = {
+    name: skillName,
+    description: description || `Claude skill for ${skillType} tasks`,
+    tags: tags || [skillType],
+    version: version,
+    type: skillType,
+    created: new Date().toISOString(),
+    compatible: ['claude-code', 'openskills'],
+    format: 'SKILL.md'
+  };
+
+  // Convert to YAML format
+  let yaml = '---\n';
+  yaml += `name: ${frontmatter.name}\n`;
+  yaml += `description: ${JSON.stringify(frontmatter.description)}\n`;
+  yaml += `tags: [${frontmatter.tags.map(t => JSON.stringify(t)).join(', ')}]\n`;
+  yaml += `version: ${frontmatter.version}\n`;
+  yaml += `type: ${frontmatter.type}\n`;
+  yaml += `created: ${frontmatter.created}\n`;
+  yaml += `compatible: [${frontmatter.compatible.map(c => JSON.stringify(c)).join(', ')}]\n`;
+  yaml += `format: ${frontmatter.format}\n`;
+  yaml += '---\n\n';
+
+  return yaml;
+}
+
+/**
+ * Generate skill instructions in imperative form for progressive disclosure
+ * @param {object} extractedData - Extracted analysis data
+ * @param {string} skillType - Type of skill
+ * @param {string} templates - Template content
+ * @returns {string} Instructions in imperative form
+ */
+function generateInstructions(extractedData, skillType, templateContent) {
+  // Extract the main content from template (skip frontmatter area)
+  const instructions = templateContent.replace(/^# .*?\n\n/, ''); // Remove title
+  const instructionsWithImperative = `# Instructions
+
+When the user asks you to apply this ${skillType} skill, follow these steps:
+
+${instructions}
+
+## References
+
+See the \`references/\` folder for:
+- Detailed practices and patterns
+- Structure guidelines
+- Complete examples
+
+All reference files are bundled with this skill and available in the skill's base directory.
+`;
+
+  return instructionsWithImperative;
+}
+
+/**
  * Generate skill files from templates
  * @param {string} skillType - Type of skill
  * @param {object} templateData - Data for template rendering
@@ -638,13 +704,32 @@ function generateSkillFiles(skillType, templateData) {
   }
 
   const files = {
-    'skill.md': null,
+    'SKILL.md': null,
     references: {}
   };
 
   // Compile and render main template
   const mainTemplate = Handlebars.compile(templates.skillMd);
-  files['skill.md'] = mainTemplate(templateData);
+  const renderedContent = mainTemplate(templateData);
+
+  // Generate YAML frontmatter
+  const frontmatter = generateSkillFrontmatter(
+    templateData.skillName,
+    templateData.description,
+    templateData.tags || [],
+    skillType,
+    1
+  );
+
+  // Generate instructions in progressive disclosure format
+  const instructions = generateInstructions(
+    templateData.extractedData,
+    skillType,
+    renderedContent
+  );
+
+  // Combine frontmatter + instructions for SKILL.md
+  files['SKILL.md'] = frontmatter + instructions;
 
   // Generate reference files
   if (templates.practicesMd) {
@@ -674,10 +759,10 @@ function generateSkillFiles(skillType, templateData) {
 async function createSkillZip(skillFiles, skillName) {
   const zip = new JSZip();
 
-  // Add main skill file
-  zip.file('skill.md', skillFiles['skill.md']);
+  // Add main SKILL.md file (OpenSkills format)
+  zip.file('SKILL.md', skillFiles['SKILL.md']);
 
-  // Add references folder
+  // Add references folder (OpenSkills compatible structure)
   if (skillFiles.references && Object.keys(skillFiles.references).length > 0) {
     const referencesFolder = zip.folder('references');
 
@@ -685,6 +770,10 @@ async function createSkillZip(skillFiles, skillName) {
       referencesFolder.file(filename, content);
     }
   }
+
+  // Add empty scripts/ and assets/ folders for full OpenSkills compatibility
+  zip.folder('scripts');
+  zip.folder('assets');
 
   // Generate ZIP buffer
   const zipBuffer = await zip.generateAsync({
@@ -796,7 +885,7 @@ function calculateTotalSize(skillFiles) {
   let totalBytes = 0;
 
   // Main skill file
-  totalBytes += Buffer.byteLength(skillFiles['skill.md'], 'utf8');
+  totalBytes += Buffer.byteLength(skillFiles['SKILL.md'], 'utf8');
 
   // Reference files
   for (const content of Object.values(skillFiles.references || {})) {
@@ -814,16 +903,21 @@ function calculateTotalSize(skillFiles) {
 function validateSkillPackage(skillFiles) {
   const issues = [];
 
-  // Check main skill file
-  if (!skillFiles['skill.md']) {
-    issues.push('Missing skill.md file');
-  } else if (skillFiles['skill.md'].length < 100) {
-    issues.push('skill.md content seems too short');
+  // Check main skill file (SKILL.md format)
+  if (!skillFiles['SKILL.md']) {
+    issues.push('Missing SKILL.md file');
+  } else if (skillFiles['SKILL.md'].length < 100) {
+    issues.push('SKILL.md content seems too short');
+  }
+
+  // Check for YAML frontmatter
+  if (skillFiles['SKILL.md'] && !skillFiles['SKILL.md'].includes('---\nname:')) {
+    issues.push('SKILL.md missing YAML frontmatter');
   }
 
   // Check for valid markdown
-  if (!isValidMarkdown(skillFiles['skill.md'])) {
-    issues.push('skill.md contains invalid markdown');
+  if (!isValidMarkdown(skillFiles['SKILL.md'])) {
+    issues.push('SKILL.md contains invalid markdown');
   }
 
   // Check reference files
