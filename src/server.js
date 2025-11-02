@@ -23,13 +23,14 @@ const corsOptions = {
           process.env.FRONTEND_URL,
           'https://frontend-khaki-six-59.vercel.app',
           'https://frontend-ec4x3btwv-sperry-entelechs-projects.vercel.app',
+          'https://claude-skills-factory.vercel.app', // Main frontend domain
         ].filter(Boolean)
       : ['http://localhost:5173', 'http://localhost:3000'];
     
-    // Allow all Vercel frontend deployments (they use pattern: frontend-*.vercel.app)
+    // Allow all Vercel frontend deployments (they use pattern: *.vercel.app)
     const isVercelFrontend = origin && (
       allowedOrigins.includes(origin) ||
-      origin.includes('frontend-') && origin.includes('.vercel.app') ||
+      origin.includes('.vercel.app') || // Allow any Vercel deployment
       origin.includes('sperry-entelechs-projects') && origin.includes('.vercel.app')
     );
     
