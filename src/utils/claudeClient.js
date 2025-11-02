@@ -139,7 +139,7 @@ function validateAnalysisResponse(parsed) {
 async function callClaudeAPI(prompt, options = {}) {
   try {
     const response = await client.messages.create({
-      model: options.model || "claude-3-5-sonnet-20241022",
+      model: options.model || "claude-3-5-sonnet-20250219",
       max_tokens: options.maxTokens || 4096,
       temperature: options.temperature || 0.3,
       system: options.system,
@@ -251,7 +251,7 @@ async function callClaudeWithRateLimit(prompt, options) {
 function logAPICall(prompt, response, duration) {
   console.log({
     timestamp: new Date().toISOString(),
-    model: 'claude-3-5-sonnet',
+    model: 'claude-3-5-sonnet-20250219',
     promptTokens: estimateTokens(prompt),
     responseTokens: estimateTokens(response),
     duration,
