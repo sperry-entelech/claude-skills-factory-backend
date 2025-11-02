@@ -10,6 +10,7 @@ const {
   RateLimitError,
   ServiceError
 } = require('../utils/claudeClient');
+const dbConnection = require('../db/database');
 
 // Analysis frameworks for different content types
 const FRAMEWORKS = {
@@ -204,9 +205,42 @@ Guidelines:
       const parsed = parseClaudeResponse(responseText);
       const validated = validateAnalysisResponse(parsed);
 
-      // 7. Build result
+      // 7. Generate analysis ID (UUID format for validation)
+      const analysisId = generateUUID();
+
+      // 8. Save analysis to database
+      const db = dbConnection.getConnection();
+      try {
+        const insertStmt = db.prepare(`
+          INSERT INTO content_analyses (
+            id, 
+            source_content, 
+            content_type, 
+            analysis_result, 
+            confidence, 
+            processing_time
+          )
+          VALUES (?, ?, ?, ?, ?, ?)
+        `);
+        
+        insertStmt.run(
+          analysisId,
+          content,
+          contentType,
+          JSON.stringify(validated.extractedData),
+          validated.confidence,
+          processingTime
+        );
+        
+        console.log(`✅ Analysis saved to database with ID: ${analysisId}`);
+      } catch (dbError) {
+        console.error('Failed to save analysis to database:', dbError);
+        // Continue anyway - analysis result is still valid, just not persisted
+      }
+
+      // 9. Build result
       const result = {
-        analysisId: generateUUID(),
+        analysisId,
         contentType,
         extractedData: validated.extractedData,
         confidence: validated.confidence,
@@ -215,11 +249,11 @@ Guidelines:
         timestamp: new Date().toISOString()
       };
 
-      // 8. Cache result (15 minute TTL)
+      // 10. Cache result (15 minute TTL)
       analysisCache.set(cacheKey, result);
       setTimeout(() => analysisCache.delete(cacheKey), 15 * 60 * 1000);
 
-      // 9. Log successful analysis
+      // 11. Log successful analysis
       logAPICall(userPrompt, responseText, processingTime * 1000);
 
       return result;
