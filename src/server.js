@@ -26,7 +26,14 @@ const corsOptions = {
         ].filter(Boolean)
       : ['http://localhost:5173', 'http://localhost:3000'];
     
-    if (allowedOrigins.includes(origin) || allowedOrigins.some(allowed => origin.startsWith(allowed))) {
+    // Allow all Vercel frontend deployments (they use pattern: frontend-*.vercel.app)
+    const isVercelFrontend = origin && (
+      allowedOrigins.includes(origin) ||
+      origin.includes('frontend-') && origin.includes('.vercel.app') ||
+      origin.includes('sperry-entelechs-projects') && origin.includes('.vercel.app')
+    );
+    
+    if (isVercelFrontend || allowedOrigins.some(allowed => origin.startsWith(allowed))) {
       callback(null, true);
     } else {
       console.warn(`CORS blocked origin: ${origin}. Allowed:`, allowedOrigins);
