@@ -192,7 +192,7 @@ Guidelines:
 
     try {
       const responseText = await callClaudeWithRateLimit(userPrompt, {
-        model: "claude-3-5-sonnet-20241022",
+        model: "claude-3-5-sonnet",
         maxTokens: 4096,
         temperature: 0.3,
         system: systemPrompt
