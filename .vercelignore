@@ -1,3 +1,4 @@
-# Ignore this directory for Vercel
+# Backend project - should not be deployed to Vercel
+# Deploy to Railway instead
 *
 
