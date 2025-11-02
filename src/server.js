@@ -12,12 +12,33 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware setup
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? process.env.FRONTEND_URL 
-    : 'http://localhost:5173',
-  credentials: true
-}));
+// CORS configuration - allow frontend URL in production, localhost in dev
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = process.env.NODE_ENV === 'production'
+      ? [
+          process.env.FRONTEND_URL,
+          'https://frontend-khaki-six-59.vercel.app',
+          'https://frontend-ec4x3btwv-sperry-entelechs-projects.vercel.app',
+        ].filter(Boolean)
+      : ['http://localhost:5173', 'http://localhost:3000'];
+    
+    if (allowedOrigins.includes(origin) || allowedOrigins.some(allowed => origin.startsWith(allowed))) {
+      callback(null, true);
+    } else {
+      console.warn(`CORS blocked origin: ${origin}. Allowed:`, allowedOrigins);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+app.use(cors(corsOptions));
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -148,14 +169,21 @@ async function startServer() {
     console.log('Database initialized');
 
     // Start listening
-    app.listen(PORT, () => {
+    // Railway requires binding to 0.0.0.0, not just localhost
+    app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Claude Skills Factory API running on port ${PORT}`);
-      console.log(`📊 Health check: http://localhost:${PORT}/health`);
-      console.log(`📚 API docs: http://localhost:${PORT}/`);
+      console.log(`📊 Health check: http://0.0.0.0:${PORT}/health`);
+      console.log(`📚 API docs: http://0.0.0.0:${PORT}/`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
       
       if (!process.env.CLAUDE_API_KEY) {
         console.log('⚠️  Warning: CLAUDE_API_KEY not set - API will not work');
+      }
+      
+      if (process.env.FRONTEND_URL) {
+        console.log(`✅ CORS configured for: ${process.env.FRONTEND_URL}`);
+      } else {
+        console.log('⚠️  Warning: FRONTEND_URL not set - CORS may block requests');
       }
     });
 
