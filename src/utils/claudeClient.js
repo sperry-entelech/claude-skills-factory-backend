@@ -135,75 +135,111 @@ function validateAnalysisResponse(parsed) {
   return parsed;
 }
 
-// Core API call function with error handling
+// List of model fallbacks (try in order)
+const MODEL_FALLBACKS = [
+  "claude-3-5-sonnet",           // Latest (recommended)
+  "claude-sonnet-4-20250514",   // Newer format
+  "claude-3-5-sonnet-20241022", // Older but stable
+  "claude-3-opus-20240229",     // Alternative
+  "claude-3-sonnet-20240229",   // Older Sonnet
+];
+
+// Core API call function with error handling and model fallback
 async function callClaudeAPI(prompt, options = {}) {
-  try {
-    const response = await client.messages.create({
-      model: options.model || "claude-3-5-sonnet",
-      max_tokens: options.maxTokens || 4096,
-      temperature: options.temperature || 0.3,
-      system: options.system,
-      messages: [{ role: "user", content: prompt }]
-    });
+  const modelsToTry = options.model 
+    ? [options.model, ...MODEL_FALLBACKS.filter(m => m !== options.model)]
+    : MODEL_FALLBACKS;
+  
+  let lastError;
+  
+  for (const model of modelsToTry) {
+    try {
+      const response = await client.messages.create({
+        model: model,
+        max_tokens: options.maxTokens || 4096,
+        temperature: options.temperature || 0.3,
+        system: options.system,
+        messages: [{ role: "user", content: prompt }]
+      });
 
-    return response.content[0].text;
+      // Log successful model usage
+      if (model !== modelsToTry[0]) {
+        console.log(`✅ Using fallback model: ${model} (original: ${modelsToTry[0]} failed)`);
+      }
+      
+      return response.content[0].text;
 
-  } catch (error) {
-    // Rate limit
-    if (error.status === 429) {
-      const retryAfter = error.headers?.['retry-after'] || 60;
-      throw new RateLimitError(
-        `Rate limit exceeded. Retry after ${retryAfter}s`,
-        retryAfter
-      );
+    } catch (error) {
+      lastError = error;
+      
+      // If it's a model not found error, try next model
+      if (error.status === 404 && error.message?.includes('model')) {
+        console.warn(`⚠️ Model ${model} not found, trying next fallback...`);
+        continue; // Try next model
+      }
+      
+      // For other errors, break and throw
+      break;
     }
+  }
 
-    // Authentication
-    if (error.status === 401) {
-      throw new ClaudeAPIError(
-        'Invalid API key',
-        'AUTH_ERROR',
-        401,
-        false
-      );
-    }
+  // If we get here, all models failed - handle the error
+  const finalError = lastError || new Error('All model fallbacks failed');
+  
+  // Rate limit
+  if (finalError.status === 429) {
+    const retryAfter = finalError.headers?.['retry-after'] || 60;
+    throw new RateLimitError(
+      `Rate limit exceeded. Retry after ${retryAfter}s`,
+      retryAfter
+    );
+  }
 
-    // Server errors (retryable)
-    if (error.status >= 500) {
-      throw new ServiceError(
-        'Claude API server error',
-        true
-      );
-    }
-
-    // Invalid request (not retryable)
-    if (error.status === 400) {
-      throw new ClaudeAPIError(
-        `Invalid request: ${error.message}`,
-        'INVALID_REQUEST',
-        400,
-        false
-      );
-    }
-
-    // Network/timeout errors (retryable)
-    if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') {
-      throw new ClaudeAPIError(
-        'Network timeout',
-        'TIMEOUT',
-        0,
-        true
-      );
-    }
-
-    // Unknown error
+  // Authentication
+  if (finalError.status === 401) {
     throw new ClaudeAPIError(
-      error.message,
-      'UNKNOWN',
-      error.status || 0,
+      'Invalid API key',
+      'AUTH_ERROR',
+      401,
       false
     );
   }
+
+  // Server errors (retryable)
+  if (finalError.status >= 500) {
+    throw new ServiceError(
+      'Claude API server error',
+      true
+    );
+  }
+
+  // Invalid request (not retryable)
+  if (finalError.status === 400) {
+    throw new ClaudeAPIError(
+      `Invalid request: ${finalError.message}`,
+      'INVALID_REQUEST',
+      400,
+      false
+    );
+  }
+
+  // Network/timeout errors (retryable)
+  if (finalError.code === 'ETIMEDOUT' || finalError.code === 'ECONNRESET') {
+    throw new ClaudeAPIError(
+      'Network timeout',
+      'TIMEOUT',
+      0,
+      true
+    );
+  }
+
+  // Unknown error
+  throw new ClaudeAPIError(
+    finalError.message || 'All model fallbacks failed',
+    'UNKNOWN',
+    finalError.status || 0,
+    false
+  );
 }
 
 // Retry logic with exponential backoff
