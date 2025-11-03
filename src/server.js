@@ -118,7 +118,47 @@ app.get('/', (req, res) => {
       skills: '/api/skills',
       generateSkill: '/api/generate-skill'
     },
-    documentation: 'See API specification for details'
+    documentation: 'See API specification for details',
+    environment: {
+      nodeEnv: process.env.NODE_ENV || 'development',
+      port: PORT,
+      corsConfigured: !!process.env.FRONTEND_URL,
+      claudeApiConfigured: !!process.env.CLAUDE_API_KEY
+    }
+  });
+});
+
+// Diagnostic endpoint for debugging frontend connections
+app.get('/api/diagnostic', (req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    backendUrl: `${req.protocol}://${req.get('host')}`,
+    apiBaseUrl: `${req.protocol}://${req.get('host')}/api`,
+    environment: {
+      nodeEnv: process.env.NODE_ENV || 'development',
+      frontendUrl: process.env.FRONTEND_URL || 'not set',
+      claudeApiConfigured: !!process.env.CLAUDE_API_KEY
+    },
+    cors: {
+      allowedOrigins: process.env.NODE_ENV === 'production'
+        ? [
+            process.env.FRONTEND_URL,
+            'https://frontend-khaki-six-59.vercel.app',
+            'https://frontend-ec4x3btwv-sperry-entelechs-projects.vercel.app',
+            'https://claude-skills-factory.vercel.app',
+            '*.vercel.app (pattern)'
+          ].filter(Boolean)
+        : ['http://localhost:5173', 'http://localhost:3000'],
+      requestingOrigin: req.get('origin') || 'none'
+    },
+    recommendations: {
+      frontendEnvVar: 'VITE_API_URL should be set to: ' + `${req.protocol}://${req.get('host')}/api`,
+      vercelSettings: 'Ensure VITE_API_URL is set in Vercel environment variables',
+      corsNote: req.get('origin') 
+        ? `Your origin (${req.get('origin')}) ${req.get('origin')?.includes('.vercel.app') ? 'should be allowed' : 'may need to be added to CORS'}`
+        : 'No origin header - direct request (should work)'
+    }
   });
 });
 
