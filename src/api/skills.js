@@ -113,8 +113,7 @@ router.get('/skills', async (req, res) => {
     const { search, type, limit = 50, offset = 0 } = req.query;
 
     let query = `
-      SELECT id, name, description, skill_type, version, created_at, updated_at,
-             json_extract(metadata, '$.tags') as tags
+      SELECT id, name, description, skill_type, version, created_at, updated_at, metadata
       FROM skills
       WHERE 1=1
     `;
@@ -157,16 +156,39 @@ router.get('/skills', async (req, res) => {
     const { total } = db.prepare(countQuery).get(countParams);
 
     res.json({
-      skills: skills.map(skill => ({
-        id: skill.id,
-        name: skill.name,
-        description: skill.description,
-        skillType: skill.skill_type,
-        version: skill.version,
-        tags: skill.tags ? JSON.parse(skill.tags) : [],
-        createdAt: skill.created_at,
-        updatedAt: skill.updated_at
-      })),
+      skills: skills.map(skill => {
+        // Parse metadata JSON
+        let metadata = {};
+        try {
+          metadata = skill.metadata ? JSON.parse(skill.metadata) : {};
+        } catch (e) {
+          console.warn(`Failed to parse metadata for skill ${skill.id}:`, e);
+          metadata = {};
+        }
+
+        // Ensure tags is always an array
+        const tags = metadata.tags || [];
+
+        return {
+          id: skill.id,
+          name: skill.name,
+          description: skill.description,
+          skillType: skill.skill_type,
+          type: skill.skill_type, // Alias for Entelech Platform compatibility
+          version: skill.version,
+          tags: tags,
+          metadata: {
+            tags: tags,
+            fileCount: metadata.fileCount || 0,
+            totalSize: metadata.totalSize || 0,
+            extractedFrom: metadata.extractedFrom || undefined,
+            github: metadata.github || undefined
+          },
+          github: metadata.github || undefined, // Direct access for Entelech Platform
+          createdAt: skill.created_at,
+          updatedAt: skill.updated_at
+        };
+      }),
       pagination: {
         total,
         limit: parseInt(limit),
